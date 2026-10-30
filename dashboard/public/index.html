@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Solar Microgrid · Live Telemetry</title>
+<meta name="description" content="Live telemetry dashboard for the ESP32 + dual INA219 solar microgrid: PV harvest, load demand, battery bus voltage and automatic load shedding." />
+<meta name="theme-color" content="#070b10" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070b10'/%3E%3Ccircle cx='16' cy='13' r='5' fill='%2334d399'/%3E%3Cpath d='M16 20v7M9 23h14' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="glow glow-a"></div>
+<div class="glow glow-b"></div>
+
+<div class="app">
+
+  <!-- ═══════════════════════ header ═══════════════════════ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 40 40" fill="none">
+          <circle cx="20" cy="15" r="6.5" fill="#34d399" opacity=".9"/>
+          <circle cx="20" cy="15" r="10.5" stroke="#34d399" stroke-opacity=".28" stroke-width="1.4"/>
+          <path d="M20 26v9M11.5 30.5h17" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>
+          <path d="M20 15 26 9" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>Solar Microgrid <span class="slash">/</span> Live Telemetry</h1>
+        <p>ESP32 · dual INA219 (0x41 PV · 0x40 Load) · PWM charge controller · automatic load priority</p>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <div class="pill" id="connPill" title="Live connection to the dashboard server">
+        <span class="dot" id="connDot"></span>
+        <span id="connText">connecting…</span>
+      </div>
+      <div class="pill ghost" id="sourcePill" title="Where the readings come from">
+        <span class="pill-key">src</span><span id="sourceText">—</span>
+      </div>
+      <div class="seg" role="group" aria-label="Time range">
+        <button class="seg-btn" data-range="1m">1m</button>
+        <button class="seg-btn" data-range="5m">5m</button>
+        <button class="seg-btn is-active" data-range="15m">15m</button>
+        <button class="seg-btn" data-range="1h">1h</button>
+        <button class="seg-btn" data-range="all">All</button>
+      </div>
+      <button class="btn" id="btnPause" title="Freeze the charts">Pause</button>
+      <a class="btn" id="btnExport" href="/api/export.csv?range=all" download>Export CSV</a>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════ alerts ═══════════════════════ -->
+  <div class="alerts" id="alerts" hidden></div>
+
+  <!-- ═══════════════════════ kpis ═══════════════════════ -->
+  <section class="kpis" id="kpis">
+    <article class="kpi" data-accent="pv">
+      <div class="kpi-head"><span class="kpi-label">PV harvest</span><span class="kpi-tag">INA219 · 0x41</span></div>
+      <div class="kpi-value"><span id="kpiPvP">—</span><i>W</i></div>
+      <div class="kpi-sub"><span id="kpiPvV">—</span> V <span class="sep">·</span> <span id="kpiPvI">—</span> A</div>
+      <div class="kpi-bar"><span id="kpiPvBar" style="width:0%"></span></div>
+    </article>
+
+    <article class="kpi" data-accent="load">
+      <div class="kpi-head"><span class="kpi-label">Load demand</span><span class="kpi-tag">INA219 · 0x40</span></div>
+      <div class="kpi-value"><span id="kpiLoadP">—</span><i>W</i></div>
+      <div class="kpi-sub"><span id="kpiLoadV">—</span> V <span class="sep">·</span> <span id="kpiLoadI">—</span> A</div>
+      <div class="kpi-bar"><span id="kpiLoadBar" style="width:0%"></span></div>
+    </article>
+
+    <article class="kpi" data-accent="net">
+      <div class="kpi-head"><span class="kpi-label">Net power</span><span class="kpi-tag" id="netTag">—</span></div>
+      <div class="kpi-value"><span id="kpiNet">—</span><i>W</i></div>
+      <div class="kpi-sub" id="kpiNetSub">harvest − demand</div>
+      <div class="kpi-bar"><span id="kpiNetBar" style="width:0%;left:50%"></span></div>
+    </article>
+
+    <article class="kpi" data-accent="bus">
+      <div class="kpi-head"><span class="kpi-label">Load bus voltage</span><span class="kpi-tag">battery proxy</span></div>
+      <div class="kpi-value"><span id="kpiBus">—</span><i>V</i></div>
+      <div class="kpi-sub" id="kpiBusSub">LVD 12.40 V · gate 12.45 V</div>
+      <div class="kpi-bar"><span id="kpiBusBar" style="width:0%"></span></div>
+    </article>
+
+    <article class="kpi" data-accent="energy">
+      <div class="kpi-head"><span class="kpi-label">Harvested today</span><span class="kpi-tag">∫ P dt</span></div>
+      <div class="kpi-value"><span id="kpiPvWh">—</span><i>Wh</i></div>
+      <div class="kpi-sub">consumed <span id="kpiLoadWh">—</span> Wh <span class="sep">·</span> net <span id="kpiNetWh">—</span> Wh</div>
+      <div class="kpi-bar"><span id="kpiEnergyBar" style="width:0%"></span></div>
+    </article>
+
+    <article class="kpi" data-accent="save">
+      <div class="kpi-head"><span class="kpi-label">Demand reduction</span><span class="kpi-tag">shedding</span></div>
+      <div class="kpi-value"><span id="kpiShed">—</span><i>%</i></div>
+      <div class="kpi-sub" id="kpiShedSub">no shedding in window</div>
+      <div class="kpi-bar"><span id="kpiShedBar" style="width:0%"></span></div>
+    </article>
+  </section>
+
+  <!-- ═══════════════════════ main grid ═══════════════════════ -->
+  <main class="grid">
+
+    <section class="card chart-card span2">
+      <div class="card-head">
+        <div>
+          <h2>Power flow</h2>
+          <p>Panel harvest against load demand, with the secondary-load shedding events underneath</p>
+        </div>
+        <div class="legend" id="legendPower"></div>
+      </div>
+      <div class="canvas-wrap tall">
+        <canvas id="chartPower"></canvas>
+      </div>
+      <div class="ribbon-wrap">
+        <div class="ribbon" id="ribbon" title="Controller state over time"></div>
+        <div class="ribbon-legend">
+          <span><i class="sw sw-normal"></i>AUTO_NORMAL</span>
+          <span><i class="sw sw-save"></i>AUTO_SAVE</span>
+          <span><i class="sw sw-idle"></i>no data</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="card state-card">
+      <div class="card-head">
+        <div>
+          <h2>System state</h2>
+          <p>Live signal path</p>
+        </div>
+        <span class="mode-chip" id="modeChip">—</span>
+      </div>
+      <ul class="pipeline" id="pipeline">
+        <li data-node="panel">
+          <span class="node-dot"></span>
+          <div class="node-body"><b>PV panel</b><small>source</small></div>
+          <span class="node-val" id="nodePanel">—</span>
+        </li>
+        <li data-node="ina41">
+          <span class="node-dot"></span>
+          <div class="node-body"><b>INA219 · 0x41</b><small>GPIO 21 / 22</small></div>
+          <span class="node-val" id="nodeIna41">—</span>
+        </li>
+        <li data-node="esp32">
+          <span class="node-dot"></span>
+          <div class="node-body"><b>ESP32 controller</b><small>firmware v10 · AUTO</small></div>
+          <span class="node-val" id="nodeEsp32">—</span>
+        </li>
+        <li data-node="relay">
+          <span class="node-dot"></span>
+          <div class="node-body"><b>Relay → secondary LED</b><small>sheddable load</small></div>
+          <span class="node-val" id="nodeRelay">—</span>
+        </li>
+        <li data-node="primary">
+          <span class="node-dot"></span>
+          <div class="node-body"><b>Primary LED</b><small>critical · always on</small></div>
+          <span class="node-val" id="nodePrimary">—</span>
+        </li>
+        <li data-node="ina40">
+          <span class="node-dot"></span>
+          <div class="node-body"><b>INA219 · 0x40</b><small>GPIO 32 / 33</small></div>
+          <span class="node-val" id="nodeIna40">—</span>
+        </li>
+      </ul>
+      <div class="control" id="control">
+        <span class="control-label">Controller command</span>
+        <div class="control-btns">
+          <button class="cbtn" data-cmd="AUTO">AUTO</button>
+          <button class="cbtn" data-cmd="NORMAL">NORMAL</button>
+          <button class="cbtn" data-cmd="SAVE">SAVE</button>
+        </div>
+        <small id="controlHint">Needs the serial bridge with --allow-control</small>
+      </div>
+    </aside>
+
+    <section class="card chart-card span2">
+      <div class="card-head">
+        <div>
+          <h2>Bus voltage &amp; protection</h2>
+          <p>Load-bus voltage (battery proxy) against the 12.40 V LVD trip and the 12.45 V healthy-NORMAL gate</p>
+        </div>
+        <div class="legend" id="legendBus"></div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="chartBus"></canvas>
+      </div>
+    </section>
+
+    <aside class="card">
+      <div class="card-head">
+        <div>
+          <h2>Link &amp; device</h2>
+          <p>Telemetry health</p>
+        </div>
+      </div>
+      <dl class="stats">
+        <div><dt>Source</dt><dd id="stSource">—</dd></div>
+        <div><dt>Last reading</dt><dd id="stLast">—</dd></div>
+        <div><dt>Sample rate</dt><dd id="stRate">—</dd></div>
+        <div><dt>Window samples</dt><dd id="stSamples">—</dd></div>
+        <div><dt>Buffer</dt><dd id="stBuffer">—</dd></div>
+        <div><dt>Server uptime</dt><dd id="stUptime">—</dd></div>
+      </dl>
+      <div class="split">
+        <span class="split-label">State share in window</span>
+        <div class="split-bar"><span id="splitNormal" class="split-normal"></span><span id="splitSave" class="split-save"></span></div>
+        <div class="split-legend">
+          <span id="splitNormalTxt">NORMAL 0%</span>
+          <span id="splitSaveTxt">SAVE 0%</span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="card chart-card">
+      <div class="card-head">
+        <div>
+          <h2>Currents</h2>
+          <p>Panel and load current draw</p>
+        </div>
+        <div class="legend" id="legendCurrent"></div>
+      </div>
+      <div class="canvas-wrap short">
+        <canvas id="chartCurrent"></canvas>
+      </div>
+    </section>
+
+    <section class="card span2">
+      <div class="card-head">
+        <div>
+          <h2>Switching events</h2>
+          <p>Every AUTO↔SAVE transition, with the measured demand reduction of the shed interval</p>
+        </div>
+        <span class="badge" id="eventBadge">0 events</span>
+      </div>
+      <div class="table-wrap">
+        <table class="events">
+          <thead>
+            <tr><th>Start</th><th>State</th><th>Duration</th><th class="num">Mean load</th><th class="num">Mean bus</th><th class="num">Shed</th></tr>
+          </thead>
+          <tbody id="eventsBody">
+            <tr class="empty"><td colspan="6">No transitions recorded yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card span3">
+      <div class="card-head">
+        <div>
+          <h2>Live serial feed</h2>
+          <p>Exactly what the ESP32 is sending — parsed rows are what feed the charts</p>
+        </div>
+        <div class="feed-actions">
+          <span class="badge" id="feedBadge">idle</span>
+          <button class="btn small" id="btnFeedPause">Freeze</button>
+        </div>
+      </div>
+      <pre class="feed" id="feed"><span class="feed-hint">Waiting for the first serial line…</span></pre>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span>ESP32 solar microgrid dashboard · decision thresholds 12.40 V LVD / 12.45 V restore gate</span>
+    <span id="footClock">—</span>
+  </footer>
+</div>
+
+<script src="/chart.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

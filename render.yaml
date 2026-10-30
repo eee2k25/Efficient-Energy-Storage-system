@@ -1,0 +1,20 @@
+# Render blueprint — one-click deploy of the telemetry dashboard.
+# Dashboard: https://<name>.onrender.com   (always-on, keeps the SSE stream alive)
+services:
+  - type: web
+    name: ees-solar-dashboard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # free plan sleeps, which breaks live streaming
+    healthCheckPath: /api/health
+    envVars:
+      - key: INGEST_KEY
+        generateValue: true  # copy this value into the bridge --ingest-key
+      - key: ALLOW_CONTROL
+        value: "false"
+      - key: DATA_DIR
+        value: /app/dashboard/data
+    disk:
+      name: telemetry
+      mountPath: /app/dashboard/data
+      sizeGB: 1

@@ -1,0 +1,27 @@
+# runtime data (telemetry logs are regenerated, never commit)
+dashboard/data/
+*.jsonl
+logs/
+*.csv
+!docs/sample_data/*.csv
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+bridge/.env
+
+# node
+node_modules/
+npm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# secrets
+.env
+.env.local

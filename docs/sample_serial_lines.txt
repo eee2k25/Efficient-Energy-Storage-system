@@ -1,0 +1,23 @@
+# Replayable example lines for the serial bridge.
+# Run:  py bridge/serial_bridge.py --stdin --file docs/sample_serial_lines.txt --sniff
+# Every format the parser understands is exercised here, and the numbers are
+# internally consistent with the bench results: AUTO_NORMAL ~3.271 W (both LED
+# sections), AUTO_SAVE ~1.759 W (primary only), bus falling through 12.45 -> 12.40 V.
+# --- both loads on (AUTO_NORMAL) ---
+PV: 19.10 V, 0.35 A, 6.68 W | LOAD: 12.62 V, 0.259 A, 3.271 W | AUTO_NORMAL | relay ON
+PV 19.02V 0.34A 6.47W  LOAD 12.58V 0.260A 3.271W  BAT 12.58V  MODE=AUTO_NORMAL RLY=ON
+pv_v=18.94 pv_a=0.33 pv_w=6.25 load_v=12.54 load_a=0.261 load_w=3.271 bus_v=12.54
+{"pv":{"v":18.86,"i":0.32,"p":6.04},"load":{"v":12.51,"i":0.261,"p":3.271},"bus":12.51,"mode":"AUTO_NORMAL","relay":true}
+[SOLAR] Panel=18.78V 0.31A 5.82W  Load=12.48V 0.262A 3.271W  Mode=AUTO_NORMAL  Relay=ON
+18.70,0.30,5.61,12.46,0.263,3.271,12.46,AUTO_NORMAL,ON
+# --- bus fell below 12.40 V: secondary shed (AUTO_SAVE) ---
+PV: 18.62 V, 0.29 A, 5.40 W | LOAD: 12.42 V, 0.142 A, 1.759 W | AUTO_SAVE | relay OFF
+PV 18.55V 0.28A 5.19W  LOAD 12.39V 0.142A 1.759W  BAT 12.39V  MODE=AUTO_SAVE RLY=OFF
+pv_v=18.47 pv_a=0.27 pv_w=4.99 load_v=12.37 load_a=0.142 load_w=1.759 bus_v=12.37
+{"pv":{"v":18.40,"i":0.26,"p":4.78},"load":{"v":12.38,"i":0.142,"p":1.759},"bus":12.38,"mode":"AUTO_SAVE","relay":false}
+[SOLAR] Panel=18.33V 0.25A 4.58W  Load=12.41V 0.142A 1.759W  Mode=AUTO_SAVE  Relay=OFF
+18.26,0.24,4.38,12.44,0.141,1.759,12.44,AUTO_SAVE,OFF
+# --- recovered above the 12.45 V gate: restore (AUTO_NORMAL) ---
+PV: 18.19 V, 0.23 A, 4.18 W | LOAD: 12.52 V, 0.260 A, 3.271 W | AUTO_NORMAL | relay ON
+PV 18.11V 0.22A 3.98W  LOAD 12.57V 0.260A 3.271W  BAT 12.57V  MODE=AUTO_NORMAL RLY=ON
+Boot OK - ESP32 solar controller v10
