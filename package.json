@@ -1,0 +1,21 @@
+{
+  "name": "ees-solar-microgrid-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live cloud dashboard for the ESP32 + dual-INA219 solar microgrid (PV / load telemetry, AUTO-SAVE switching, energy accounting)",
+  "type": "commonjs",
+  "main": "dashboard/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node dashboard/server.js",
+    "dev": "node dashboard/server.js --simulate",
+    "simulate": "SIMULATE=1 node dashboard/server.js",
+    "selftest": "node scripts/selftest.js",
+    "smoke": "node scripts/ui-smoke-test.js",
+    "live": "node dashboard/server.js",
+    "thingspeak:check": "python3 tools/thingspeak_check.py --offline-selftest"
+  },
+  "dependencies": {}
+}
