@@ -13,7 +13,9 @@
     "dev": "node dashboard/server.js --simulate",
     "simulate": "SIMULATE=1 node dashboard/server.js",
     "selftest": "node scripts/selftest.js",
-    "smoke": "node scripts/ui-smoke-test.js"
+    "smoke": "node scripts/ui-smoke-test.js",
+    "live": "node dashboard/server.js",
+    "thingspeak:check": "python3 tools/thingspeak_check.py --offline-selftest"
   },
   "dependencies": {}
 }

@@ -169,7 +169,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const jsRes = await get('/app.js');
   ok('serves app.js', jsRes.status === 200 && jsRes.body.length > 5000);
 
-  /* ---------- SSE ---------- */
+  /* ---------- SSE ----------
+   * The simulator halts once real (src=serial) data arrives, so the test drives
+   * its own sample through the ingest path while the stream is open. */
   const sse = await new Promise((resolve) => {
     let buf = '';
     const req = http.get({ host: '127.0.0.1', port: PORT, path: '/api/stream?range=15m' }, (res) => {
@@ -180,11 +182,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           resolve({ ok: true, buf });
         }
       });
+      // push a live sample shortly after subscribing
+      setTimeout(() => {
+        post('/api/ingest', {
+          pv: { v: 18.0, i: 0.42, p: 7.56 },
+          load: { v: 12.47, i: 0.26, p: 3.27 },
+          bus: 12.47, mode: 'AUTO_NORMAL', relay: true, src: 'serial',
+        }).catch(() => {});
+      }, 300);
     });
     req.on('error', () => resolve({ ok: false }));
     setTimeout(() => { try { req.destroy(); } catch {} resolve({ ok: false, buf }); }, 6000);
   });
   ok('SSE stream pushes sample + summary events', sse.ok, (sse.buf || '').slice(0, 160));
+
+  /* ---------- simulator hand-over ---------- */
+  const healthAfter = JSON.parse((await get('/api/health')).body);
+  ok('simulator stops once real hardware data arrives', healthAfter.simulate === false, `simulate=${healthAfter.simulate}`);
+  ok('real data stays the latest reading', JSON.parse((await get('/api/summary')).body).latest?.src === 'serial');
 
   /* ---------- commands ---------- */
   const cmd = await post('/api/command', { cmd: 'SAVE' });

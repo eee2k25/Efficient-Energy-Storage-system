@@ -88,7 +88,8 @@ function summaryPayload(range) {
     alerts: store.alerts(now),
     control: { enabled: ALLOW_CONTROL, pending: store.commands.slice(-5) },
     buffer: store.samples.length,
-    server: { uptimeS: Math.round((now - startedAt) / 1000), simulate: SIMULATE, version: 1 },
+    simulating: Boolean(simTimer),
+    server: { uptimeS: Math.round((now - startedAt) / 1000), simulate: Boolean(simTimer), version: 1 },
   };
 }
 
@@ -103,6 +104,17 @@ let currentRange = '15m';
 /* ------------------------------------------------------------ simulator run */
 
 let lastMode = null;
+let simTimer = null;
+
+/** Real hardware overrides the demo generator — never mix the two on one chart. */
+function haltSimulator(reason) {
+  if (!simTimer) return;
+  clearInterval(simTimer);
+  simTimer = null;
+  console.log(`[sim] stopped — ${reason}`);
+  broadcast('notice', { level: 'info', msg: `Demo simulator stopped: ${reason}. Showing real hardware data.` });
+}
+
 if (SIMULATE) {
   const BACKFILL = 900;
   const BACKFILL_STEP_S = 3;
@@ -118,7 +130,7 @@ if (SIMULATE) {
   console.log(`[sim] backfilled 900 samples, soc=${(sim.soc * 100).toFixed(1)}%`);
 
   const tickMs = Number(process.env.SIM_TICK_MS || 1500);
-  setInterval(() => {
+  simTimer = setInterval(() => {
     const s = sim.step(tickMs / 1000);
     const added = store.add(s, 'sim');
     if (added && added.mode !== lastMode) {
@@ -127,7 +139,8 @@ if (SIMULATE) {
       broadcast('event', { type: 'state', sample: added });
     }
     publish(added);
-  }, tickMs).unref?.();
+  }, tickMs);
+  simTimer.unref?.();
 }
 
 if (process.env.THINGSPEAK_CHANNEL) {
@@ -174,7 +187,10 @@ const server = http.createServer(async (req, res) => {
         const s = store.add(item, item?.src || 'serial');
         if (s) { accepted++; last = s; }
       }
-      if (last) publish(last);
+      if (last) {
+        if (last.src !== 'sim') haltSimulator('real hardware data received');
+        publish(last);
+      }
       return json(res, accepted ? 200 : 422, { ok: accepted > 0, accepted, rejected: items.length - accepted });
     }
 
@@ -221,7 +237,7 @@ const server = http.createServer(async (req, res) => {
       const last = store.lastSample;
       return json(res, 200, {
         ok: true,
-        simulate: SIMULATE,
+        simulate: Boolean(simTimer),
         thingspeak: Boolean(process.env.THINGSPEAK_CHANNEL),
         samples: store.samples.length,
         lastSeen: last ? last.t : null,

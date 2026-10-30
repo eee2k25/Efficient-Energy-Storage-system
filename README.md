@@ -31,13 +31,24 @@ node dashboard/server.js --simulate
 Live mode (real ESP32 attached):
 
 ```bash
-# terminal 1 — dashboard
+# terminal 1 — dashboard (no --simulate)
 node dashboard/server.js
 
 # terminal 2 — serial bridge
 py -m pip install pyserial
-py bridge/serial_bridge.py --port COM3
+py bridge/serial_bridge.py --list          # find the port
+py bridge/serial_bridge.py --port COM3 --sniff   # check the lines parse
+py bridge/serial_bridge.py --port COM3     # stream for real
 ```
+
+Full checklist including ThingSpeak keys, cloud hosting and a troubleshooting
+table: **[docs/CONNECT_HARDWARE.md](docs/CONNECT_HARDWARE.md)**.
+
+The bridge auto-detects CP210x/CH340 boards, reconnects if USB drops, runs a
+preflight check (dashboard reachable? port open?), and can capture every raw line
+with `--log logs\run_01.txt` for later replay. If the server is in `--simulate`
+mode, the first real reading stops the simulator automatically, so demo and live
+data never mix on one chart.
 
 That's it: whatever the ESP32 prints in the Serial Monitor now appears in the
 browser as graphs. If your firmware prints in a different layout, the parser
@@ -80,6 +91,9 @@ Three ways to get data in — use any combination:
 | ThingSpeak poller | `THINGSPEAK_CHANNEL=1234567 THINGSPEAK_READ_KEY=... node dashboard/server.js` | ESP32 already posts to ThingSpeak |
 | Simulator | `node dashboard/server.js --simulate` | demos, report screenshots, UI work |
 
+When the dashboard has no data at all it shows a **connect-hardware panel** with
+the exact commands to run, so the setup is discoverable from the page itself.
+
 ---
 
 ## 3. Connecting the ESP32
@@ -101,7 +115,8 @@ the exact snippet (it only adds `Serial.print`, nothing touches the relay policy
 Useful bridge options:
 
 ```bash
-py bridge/serial_bridge.py --port COM3 --sniff          # show raw line + parse result
+py bridge/serial_bridge.py --list                        # list serial ports
+py bridge/serial_bridge.py --port COM3 --sniff           # show raw line + parse result
 py bridge/serial_bridge.py --port COM3 --url https://my-dashboard.onrender.com
 py bridge/serial_bridge.py --port COM3 --allow-control  # accept dashboard commands
 py bridge/serial_bridge.py --stdin --file logs/run.csv  # replay a captured log
@@ -113,6 +128,14 @@ Monitor first — only one program can own `COM3`.
 ---
 
 ## 4. ThingSpeak (optional)
+
+Check the channel and keys from your machine first:
+
+```bash
+py tools/thingspeak_check.py --channel 3551777 --read-key YOUR_READ_KEY
+py tools/thingspeak_check.py --channel 3551777 --read-key R --write-key W --test-write
+py tools/thingspeak_check.py --offline-selftest      # mapping logic only
+```
 
 **Push to ThingSpeak** from the bridge (free tier: one update / 15 s, handled
 automatically):
@@ -231,10 +254,17 @@ dashboard/
   lib/thingspeak.js    ThingSpeak channel reader
   public/              index.html · styles.css · app.js · chart.js (canvas charts)
 bridge/
-  serial_bridge.py     ESP32 serial → dashboard (+ ThingSpeak), --sniff, --allow-control
+  serial_bridge.py     ESP32 serial → dashboard (+ ThingSpeak); --list/--sniff/
+                       --log/--dry-run/--allow-control, auto-detect, auto-reconnect
+  .env.example         copy to .env (gitignored) for port, URL, keys
+firmware/
+  telemetry_addon.ino  OPTIONAL v10 snippet: JSON print (+ ThingSpeak variant)
 scripts/selftest.js    end-to-end API test (36 checks)
 scripts/ui-smoke-test.js  runs the real page in jsdom (15 checks)
+tools/
+  thingspeak_check.py  verify channel + API keys, offline mapping self-test
 docs/
+  CONNECT_HARDWARE.md  step-by-step real hardware hookup + troubleshooting
   FIRMWARE_SERIAL.md   exact print snippet + format calibration
   sample_serial_lines.txt  replayable example lines
 Dockerfile

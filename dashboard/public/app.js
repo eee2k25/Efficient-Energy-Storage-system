@@ -200,6 +200,9 @@ function applySummary(s) {
   $('stBuffer').textContent = s.buffer ? `${s.buffer.toLocaleString()} samples` : DASH;
   $('stUptime').textContent = dur(s.uptimeS);
 
+  const stale = ageMs === null || ageMs > 20000;
+  renderOnboard(stale);
+
   state.controlEnabled = Boolean(s.control?.enabled);
   document.querySelectorAll('.cbtn').forEach((b) => { b.disabled = !state.controlEnabled; });
   $('controlHint').textContent = state.controlEnabled
@@ -279,6 +282,35 @@ function setConn(kind, ageMs) {
     pill.classList.add('down');
     txt.textContent = 'offline';
   }
+}
+
+function renderOnboard(show) {
+  const el = $('onboard');
+  if (!el) return;
+  const shouldShow = Boolean(show) && !state.summary?.server?.simulate;
+  if (el.hidden === !shouldShow) return;
+  el.hidden = !shouldShow;
+}
+
+function initCopyButtons() {
+  document.querySelectorAll('code.cmd').forEach((el) => {
+    el.title = 'Click to copy';
+    el.addEventListener('click', async () => {
+      const text = el.dataset.cmd || el.textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch {}
+        ta.remove();
+      }
+      el.classList.add('copied');
+      setTimeout(() => el.classList.remove('copied'), 1200);
+    });
+  });
 }
 
 function renderAlerts(alerts) {
@@ -554,6 +586,7 @@ function tickClock() {
 function boot() {
   initCharts();
   initControls();
+  initCopyButtons();
   connect();
   loadSeries().then(loadEvents);
   setInterval(() => { if (!state.paused) loadSeries(); }, 4000);

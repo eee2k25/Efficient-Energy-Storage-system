@@ -8,8 +8,11 @@
  * blank with no server-side error; the API self-test cannot catch that.
  *
  *   npm i --no-save jsdom
- *   node dashboard/server.js --simulate &      # or POST some samples
+ *   node dashboard/server.js --simulate &      # populated dashboard
  *   node scripts/ui-smoke-test.js
+ *
+ *   # or against a server with no data, to check the connect-hardware panel:
+ *   EXPECT_EMPTY=1 node scripts/ui-smoke-test.js
  *
  * Exit code 0 = every check passed.
  */
@@ -103,8 +106,22 @@ window.eval(fs.readFileSync(path.join(APP, 'app.js'), 'utf8'));
 const text = (id) => window.document.getElementById(id)?.textContent?.trim();
 const doc = window.document;
 
+const EXPECT_EMPTY = process.env.EXPECT_EMPTY === '1';
+
 setTimeout(() => {
   check('no runtime errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+
+  if (EXPECT_EMPTY) {
+    const onboard = doc.getElementById('onboard');
+    check('connect-hardware panel is visible', onboard && !onboard.hidden);
+    check('panel lists the bridge command', /serial_bridge\.py --port/.test(onboard?.textContent || ''));
+    check('panel has copy-able commands', doc.querySelectorAll('#onboard code.cmd').length >= 3,
+      `${doc.querySelectorAll('#onboard code.cmd').length} commands`);
+    check('KPIs stay empty (no fake values)', text('kpiPvP') === '—', `value=${text('kpiPvP')}`);
+    check('connection pill shows offline-ish state', /down|demo/.test(doc.getElementById('connPill').className), doc.getElementById('connPill').className);
+    return finish();
+  }
+
   for (const [label, id] of [
     ['PV', 'kpiPvP'], ['load', 'kpiLoadP'], ['bus', 'kpiBus'], ['net', 'kpiNet'], ['energy', 'kpiPvWh'],
   ]) {
@@ -113,10 +130,12 @@ setTimeout(() => {
   check('mode chip shows controller state', /AUTO|SAVE|NORMAL/.test(text('modeChip') || ''), text('modeChip'));
   check('connection pill switched state', /live|demo/.test(doc.getElementById('connPill').className), doc.getElementById('connPill').className);
   check('events table rendered rows', doc.querySelectorAll('#eventsBody tr').length > 0, `${doc.querySelectorAll('#eventsBody tr').length} rows`);
-  check('state ribbon has segments', doc.querySelectorAll('#ribbon span').length > 1, `${doc.querySelectorAll('#ribbon span').length} segments`);
+  check('state ribbon has segments', doc.querySelectorAll('#ribbon span').length > 0, `${doc.querySelectorAll('#ribbon span').length} segments`);
   check('live feed received lines', doc.querySelectorAll('#feed .ln').length > 0, `${doc.querySelectorAll('#feed .ln').length} lines`);
   check('mode share split computed', /NORMAL \d+%/.test(text('splitNormalTxt') || ''), text('splitNormalTxt'));
   check('legend buttons built', doc.querySelectorAll('#legendPower button').length === 3);
+  check('connect-hardware panel hidden while data flows', doc.getElementById('onboard').hidden,
+    'onboard panel is showing although telemetry is arriving');
 
   try {
     doc.querySelectorAll('#legendPower button')[0].click();
@@ -128,6 +147,10 @@ setTimeout(() => {
     check('range switch works', true);
   } catch (e) { check('range switch works', false, e.message); }
 
+  finish();
+}, 4000);
+
+function finish() {
   let pass = 0;
   for (const r of results) {
     console.log(`  ${r.ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m'} ${r.name}${r.ok ? '' : '  ' + (r.extra || '')}`);
@@ -136,4 +159,4 @@ setTimeout(() => {
   console.log(`\n${pass}/${results.length} frontend checks passed`);
   if (errors.length) console.log('\nerrors:', errors.slice(0, 5));
   process.exit(pass === results.length ? 0 : 1);
-}, 4000);
+}

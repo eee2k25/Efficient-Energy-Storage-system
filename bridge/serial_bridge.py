@@ -45,11 +45,29 @@ import urllib.request
 
 # ─────────────────────────── configuration ───────────────────────────
 
+def load_env_file(path: str) -> None:
+    """Minimal .env loader (no dependencies): KEY=VALUE lines, # comments."""
+    if not path or not os.path.isfile(path):
+        return
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip().strip('"').strip("'")
+            if key and key not in os.environ:      # real env wins over the file
+                os.environ[key] = val
+
+
+load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 DEFAULTS = {
     "url": os.environ.get("DASHBOARD_URL", "http://localhost:3000"),
     "ingest_key": os.environ.get("INGEST_KEY", ""),
-    "baud": 115200,
+    "baud": int(os.environ.get("SERIAL_BAUD", "115200") or 115200),
     "thingspeak_key": os.environ.get("THINGSPEAK_WRITE_KEY", ""),
+    "thingspeak_channel": os.environ.get("THINGSPEAK_CHANNEL", ""),
 }
 
 MODES = ("AUTO_NORMAL", "AUTO_SAVE", "AUTONORMAL", "AUTOSAVE", "NORMAL", "SAVE", "AUTO", "MANUAL")
@@ -358,51 +376,246 @@ def poll_commands(args, state: dict, send) -> None:
         pass
 
 
+def dashboard_health(url: str, key: str = "") -> dict | None:
+    try:
+        req = urllib.request.Request(url.rstrip("/") + "/api/health")
+        if key:
+            req.add_header("x-api-key", key)
+        with urllib.request.urlopen(req, timeout=5) as res:
+            return json.loads(res.read().decode() or "{}")
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return None
+
+
+def preflight(args) -> bool:
+    """Print a short checklist so the user knows what is and isn't ready."""
+    print("\n  preflight")
+    health = dashboard_health(args.url, args.ingest_key)
+    if health is None:
+        print(f"  ✗ dashboard not reachable at {args.url}")
+        print("     start it with:  node dashboard/server.js")
+        print("     (samples will be buffered until it comes up)")
+    else:
+        mode = "SIMULATION" if health.get("simulate") else "LIVE"
+        print(f"  ✓ dashboard reachable  ({mode}, {health.get('samples', 0)} samples buffered)")
+        if health.get("simulate"):
+            print("     ⚠ the server is in simulation mode — restart it WITHOUT --simulate")
+            print("       so the charts show only your real hardware.")
+
+    try:
+        import serial  # noqa: F401
+        print("  ✓ pyserial installed")
+    except ImportError:
+        print("  ✗ pyserial missing — run:  py -m pip install pyserial")
+        return False
+
+    port = args.port or autodetect_port()
+    if not port:
+        print("  ✗ no serial port found — is the ESP32 plugged in?")
+        list_ports_brief()
+        return False
+    print(f"  ✓ serial port {port} @ {args.baud} baud")
+    print()
+    return health is not None
+
+
+def _usb_score(dev) -> int:
+    desc = f"{dev.description or ''} {dev.manufacturer or ''} {dev.hwid or ''}".lower()
+    score = 0
+    for token in ("cp210", "ch340", "ch910", "silicon labs", "ftdi", "usb", "uart", "espressif"):
+        if token in desc:
+            score += 2
+    if dev.device and ("usb" in dev.device.lower() or "acm" in dev.device.lower()):
+        score += 1
+    return score
+
+
+def _ports():
+    import serial.tools.list_ports as lp
+    return sorted(lp.comports(), key=lambda d: d.device or "")
+
+
+def list_ports_brief() -> None:
+    ports = _ports()
+    if not ports:
+        print("     no serial ports detected")
+        return
+    for d in ports:
+        print(f"     {d.device:<14} {d.description or 'unknown device'}")
+
+
+def _is_legacy_port(dev) -> bool:
+    """Motherboard UARTs (Linux ttyS*, some COM1) are never the ESP32."""
+    name = (dev.device or "").lower()
+    if re.match(r"/dev/tty(s|ama|acm-legacy)\d", name):
+        return True
+    if name in ("com1",) and not dev.description:
+        return True
+    return False
+
+
+def autodetect_port() -> str | None:
+    """Pick the most likely ESP32 port (CP210x / CH340 / USB serial)."""
+    try:
+        ports = _ports()
+    except Exception:
+        return None
+    candidates = [d for d in ports if not _is_legacy_port(d)]
+    scored = sorted(candidates, key=_usb_score, reverse=True)
+    if scored and _usb_score(scored[0]) > 0:
+        return scored[0].device
+    if len(candidates) == 1:
+        return candidates[0].device
+    return None
+
+
+def open_port(port: str, baud: int):
+    import serial
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = baud
+    ser.timeout = 1
+    ser.write_timeout = 2
+    # Avoid the classic "ESP32 resets when the port opens" surprise.
+    for attr, val in (("dtr", False), ("rts", False)):
+        try:
+            setattr(ser, attr, val)
+        except Exception:
+            pass
+    ser.open()
+    return ser
+
+
+def _port_hint(err: Exception) -> None:
+    msg = str(err)
+    low = msg.lower()
+    print(f"[bridge] could not open the port: {msg}", file=sys.stderr)
+    if "permission" in low or "access is denied" in low or "busy" in low or "errno 16" in low:
+        print("[bridge] The port is owned by another program. Close the Arduino IDE\n"
+              "         Serial Monitor (or any other logger) and run this again.\n"
+              "         On Windows you can check with:  py bridge/serial_bridge.py --list",
+              file=sys.stderr)
+    elif "file not found" in low or "no such file" in low or "cannot find" in low:
+        print("[bridge] That port does not exist. Run:  py bridge/serial_bridge.py --list",
+              file=sys.stderr)
+
+
 def run_serial(args) -> int:
     try:
-        import serial  # pyserial
+        import serial
     except ImportError:
         print("pyserial is not installed.  Run:  py -m pip install pyserial", file=sys.stderr)
         return 2
 
-    print(f"[bridge] opening {args.port} @ {args.baud} baud …")
+    port = args.port
+    if not port or port.lower() == "auto":
+        port = autodetect_port()
+        if not port:
+            print("[bridge] could not auto-detect the ESP32. Available ports:", file=sys.stderr)
+            list_ports_brief()
+            print("[bridge] pass one explicitly:  --port COM3", file=sys.stderr)
+            return 1
+        print(f"[bridge] auto-detected port {port}")
+
+    preflight(args)
+    if args.dry_run:
+        print("[bridge] --dry-run: port and dashboard look usable, nothing was read.")
+        return 0
+
+    print(f"[bridge] opening {port} @ {args.baud} baud …")
     try:
-        ser = serial.Serial(args.port, args.baud, timeout=1)
-    except serial.SerialException as e:
-        msg = str(e)
-        print(f"[bridge] could not open {args.port}: {msg}", file=sys.stderr)
-        if "Permission" in msg or "Access is denied" in msg or "busy" in msg.lower():
-            print("[bridge] The port is owned by another program. Close the Arduino Serial\n"
-                  "         Monitor (or any other logger) and try again.", file=sys.stderr)
+        ser = open_port(port, args.baud)
+    except Exception as e:  # SerialException, PermissionError, OSError
+        _port_hint(e)
         return 1
+
+    logfh = None
+    if args.log:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(args.log)), exist_ok=True)
+            logfh = open(args.log, "a", encoding="utf-8")
+            print(f"[bridge] capturing raw lines to {args.log}")
+        except OSError as e:
+            print(f"[bridge] cannot write log file: {e}", file=sys.stderr)
 
     state = {"buffer": [], "ok": 0}
     send = (lambda cmd: (ser.write((cmd + "\n").encode()), ser.flush()))
-    print(f"[bridge] posting to {args.url}  (Ctrl+C to stop)")
+    print(f"[bridge] posting to {args.url}  (Ctrl+C to stop)\n")
+
+    started = time.time()
+    lines_seen = 0
+    samples_seen = 0
+    announce_idle = started + 8
+
     try:
         while True:
-            raw = ser.readline()
+            try:
+                raw = ser.readline()
+            except (serial.SerialException, OSError) as e:
+                print(f"\n[bridge] serial link lost ({e}); reconnecting in 5 s…", file=sys.stderr)
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+                time.sleep(5)
+                try:
+                    ser = open_port(port, args.baud)
+                    print("[bridge] reconnected")
+                except Exception as e2:
+                    _port_hint(e2)
+                    return 1
+                continue
+
             if not raw:
                 poll_commands(args, state, send)
+                if time.time() > announce_idle and samples_seen == 0:
+                    if lines_seen == 0:
+                        print("[bridge] no data at all — is the ESP32 printing? Try a different\n"
+                              "         --baud (9600 is common) or press the EN/RST button.")
+                    else:
+                        print(f"[bridge] received {lines_seen} line(s) but none parsed — run with\n"
+                              "         --sniff to see the raw text and adjust the format.")
+                    announce_idle = time.time() + 30
                 continue
+
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
+            lines_seen += 1
+            if logfh:
+                logfh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {line}\n")
+                logfh.flush()
+
             if args.sniff:
                 print(f"  raw  │ {line}")
             sample = parse_line(line)
             if not sample:
                 if args.sniff:
-                    print("  !    │ unparsed — copy this line into the README and adjust the parser")
+                    print("  !    │ unparsed — see docs/FIRMWARE_SERIAL.md")
                 continue
+
+            samples_seen += 1
             if args.sniff:
-                print(f"  ok   │ PV {sample.get('pv')}  LOAD {sample.get('load')}  mode={sample.get('mode')} relay={sample.get('relay')}")
+                print(f"  ok   │ PV {sample.get('pv')}  LOAD {sample.get('load')}  "
+                      f"mode={sample.get('mode')} relay={sample.get('relay')}")
+                continue
+
             emit(sample, args, state)
+            if samples_seen == 1:
+                print("[bridge] ✓ first sample accepted — the dashboard is now receiving live data")
+                if state.get("fail"):
+                    print("[bridge]   (dashboard was unreachable earlier; buffered samples will flush)")
             poll_commands(args, state, send)
     except KeyboardInterrupt:
-        print("\n[bridge] stopped")
+        print("\n[bridge] stopped by user")
     finally:
-        ser.close()
+        try:
+            ser.close()
+        except Exception:
+            pass
+        if logfh:
+            logfh.close()
+        print(f"[bridge] {samples_seen} sample(s) parsed from {lines_seen} line(s)")
     return 0
 
 
@@ -454,7 +667,10 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__.split("The parser accepts")[0],
     )
-    ap.add_argument("--port", help="serial port, e.g. COM3 (Windows) or /dev/ttyUSB0 (Linux)")
+    ap.add_argument("--port", help="serial port, e.g. COM3 (Windows) or /dev/ttyUSB0 (Linux); 'auto' guesses")
+    ap.add_argument("--list", action="store_true", help="list available serial ports and exit")
+    ap.add_argument("--dry-run", action="store_true", help="check port + dashboard, then exit without reading")
+    ap.add_argument("--log", help="append every raw serial line to this file (replay later with --stdin)")
     ap.add_argument("--baud", type=int, default=DEFAULTS["baud"])
     ap.add_argument("--url", default=DEFAULTS["url"], help="dashboard base URL (default %(default)s)")
     ap.add_argument("--ingest-key", default=DEFAULTS["ingest_key"], help="INGEST_KEY of the server, if set")
@@ -467,6 +683,15 @@ def main() -> int:
     ap.add_argument("--rate", type=float, default=0, help="with --stdin, replay at N lines/second")
     ap.add_argument("--echo-every", type=int, default=10, help="print a confirmation every N samples")
     args = ap.parse_args()
+
+    if args.list:
+        print("Available serial ports:")
+        list_ports_brief()
+        guess = autodetect_port()
+        if guess:
+            print(f"\nMost likely ESP32 port: {guess}")
+            print(f"  py bridge/serial_bridge.py --port {guess} --sniff")
+        return 0
 
     if args.sniff and not args.port and not args.stdin:
         ap.error("--sniff needs --port or --stdin")

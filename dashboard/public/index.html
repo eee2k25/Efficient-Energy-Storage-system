@@ -52,6 +52,50 @@
     </div>
   </header>
 
+
+  <!-- ═══════════════════════ onboarding (no live data) ═══════════════════════ -->
+  <section class="card onboard" id="onboard" hidden>
+    <div class="onboard-head">
+      <div class="onboard-icon" aria-hidden="true">⚡</div>
+      <div>
+        <h2>No live data yet — connect the ESP32</h2>
+        <p>The dashboard is running and waiting. Start the serial bridge on the laptop that has the ESP32 plugged in.</p>
+      </div>
+    </div>
+    <ol class="onboard-steps">
+      <li>
+        <div class="step-body">
+          <b>Install pyserial (once)</b>
+          <code class="cmd" data-cmd="py -m pip install pyserial">py -m pip install pyserial</code>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <b>Find the ESP32 port</b>
+          <code class="cmd" data-cmd="py bridge/serial_bridge.py --list">py bridge/serial_bridge.py --list</code>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <b>Check that the serial lines parse</b>
+          <code class="cmd" data-cmd="py bridge/serial_bridge.py --port COM3 --sniff">py bridge/serial_bridge.py --port COM3 --sniff</code>
+          <small>close the Arduino Serial Monitor first — only one program can own <code>COM3</code></small>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <b>Stream to the dashboard</b>
+          <code class="cmd" data-cmd="py bridge/serial_bridge.py --port COM3">py bridge/serial_bridge.py --port COM3</code>
+          <small>this page will start updating within a second</small>
+        </div>
+      </li>
+    </ol>
+    <p class="onboard-foot">
+      Different setup? <a href="/api/health">/api/health</a> shows the server state, and
+      <code>docs/CONNECT_HARDWARE.md</code> has the full checklist plus ThingSpeak and cloud options.
+    </p>
+  </section>
+
   <!-- ═══════════════════════ alerts ═══════════════════════ -->
   <div class="alerts" id="alerts" hidden></div>
 
