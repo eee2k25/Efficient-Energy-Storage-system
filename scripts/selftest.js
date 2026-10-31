@@ -98,7 +98,7 @@ function fetchFrom(port, pathname) {
   console.log('\n\x1b[1mEES dashboard self-test\x1b[0m\n');
 
   const server = spawn(process.execPath, [path.join(ROOT, 'dashboard', 'server.js')], {
-    env: { ...process.env, SIMULATE: '1', PORT: String(PORT), DATA_DIR, SIM_TICK_MS: '400', INGEST_KEY: '' },
+    env: { ...process.env, SIMULATE: '1', PORT: String(PORT), DATA_DIR, SIM_TICK_MS: '400', INGEST_KEY: '', ALLOW_CONTROL: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -190,7 +190,7 @@ function fetchFrom(port, pathname) {
 
   /* ---------- ingest key ---------- */
   const secured = spawn(process.execPath, [path.join(ROOT, 'dashboard', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT + 1), DATA_DIR, INGEST_KEY: 'secret123', CONTROL_KEY: 'ctl456', SIMULATE: '1' },
+    env: { ...process.env, PORT: String(PORT + 1), DATA_DIR, INGEST_KEY: 'secret123', CONTROL_KEY: 'ctl456', SIMULATE: '1', ALLOW_CONTROL: '1' },
     stdio: 'ignore',
   });
   await sleep(1200);

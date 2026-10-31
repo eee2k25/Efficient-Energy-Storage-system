@@ -59,7 +59,7 @@
       <div class="onboard-icon" aria-hidden="true">⚡</div>
       <div>
         <h2>No live data yet — connect the ESP32</h2>
-        <p>The dashboard is running and waiting. Start the serial bridge on the laptop that has the ESP32 plugged in.</p>
+        <p>The dashboard is running and waiting. Start the final-v10 serial bridge on the laptop that has the ESP32 plugged in.</p>
       </div>
     </div>
     <ol class="onboard-steps">
@@ -71,22 +71,29 @@
       </li>
       <li>
         <div class="step-body">
+          <b>Configure the cloud address once</b>
+          <code class="cmd" data-cmd="DASHBOARD_URL=https://ees-solar-dashboard.onrender.com">DASHBOARD_URL=https://ees-solar-dashboard.onrender.com</code>
+          <small>Put this and your private <code>INGEST_KEY</code> in <code>bridge/.env</code>; see <code>docs/FINAL_V10_RENDER_INTEGRATION.md</code>.</small>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
           <b>Find the ESP32 port</b>
           <code class="cmd" data-cmd="py bridge/serial_bridge.py --list">py bridge/serial_bridge.py --list</code>
         </div>
       </li>
       <li>
         <div class="step-body">
-          <b>Check that the serial lines parse</b>
+          <b>Check final-v10 DATA lines parse</b>
           <code class="cmd" data-cmd="py bridge/serial_bridge.py --port COM3 --sniff">py bridge/serial_bridge.py --port COM3 --sniff</code>
-          <small>close the Arduino Serial Monitor first — only one program can own <code>COM3</code></small>
+          <small>close Arduino Serial Monitor, the collector, and ML dry-run first — only one program can own <code>COM3</code></small>
         </div>
       </li>
       <li>
         <div class="step-body">
-          <b>Stream to the dashboard</b>
+          <b>Stream read-only telemetry</b>
           <code class="cmd" data-cmd="py bridge/serial_bridge.py --port COM3">py bridge/serial_bridge.py --port COM3</code>
-          <small>this page will start updating within a second</small>
+          <small>this public dashboard does not send relay commands</small>
         </div>
       </li>
     </ol>
@@ -208,16 +215,29 @@
           <span class="node-val" id="nodeIna40">—</span>
         </li>
       </ul>
-      <div class="control" id="control">
-        <span class="control-label">Controller command</span>
-        <div class="control-btns">
-          <button class="cbtn" data-cmd="AUTO">AUTO</button>
-          <button class="cbtn" data-cmd="NORMAL">NORMAL</button>
-          <button class="cbtn" data-cmd="SAVE">SAVE</button>
-        </div>
-        <small id="controlHint">Needs the serial bridge with --allow-control</small>
+      <div class="control control-readonly" id="control">
+        <span class="control-label">Relay-control boundary</span>
+        <div class="control-status"><span class="status-dot"></span>Local ESP32 AUTO only</div>
+        <small id="controlHint">This public dashboard is telemetry-only. It cannot send relay commands.</small>
       </div>
     </aside>
+
+    <section class="card ml-evidence">
+      <div class="card-head">
+        <div>
+          <h2>Offline ML evidence</h2>
+          <p>Decision Tree dry-run trained from real ESP32 serial telemetry</p>
+        </div>
+        <span class="badge ml-badge">NO LIVE RELAY CONTROL</span>
+      </div>
+      <div class="ml-metrics">
+        <div><span>Training</span><b>122</b><small>61 NORMAL · 61 SAVE</small></div>
+        <div><span>Fresh holdout</span><b>69</b><small>9 NORMAL · 60 SAVE</small></div>
+        <div><span>Preliminary holdout</span><b>100%</b><small>0 unsafe SAVE → NORMAL</small></div>
+      </div>
+      <div class="ml-rule"><code>load_mA ≤ 169</code><span>→ SAVE</span><i>otherwise → NORMAL</i></div>
+      <p class="ml-note">Weather limited the fresh NORMAL holdout to nine accepted rows. This is a laptop-only, preliminary classification result; the rule-based ESP32 safety controller remains authoritative.</p>
+    </section>
 
     <section class="card chart-card span2">
       <div class="card-head">

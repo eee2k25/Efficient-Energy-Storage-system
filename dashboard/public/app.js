@@ -205,9 +205,10 @@ function applySummary(s) {
 
   state.controlEnabled = Boolean(s.control?.enabled);
   document.querySelectorAll('.cbtn').forEach((b) => { b.disabled = !state.controlEnabled; });
-  $('controlHint').textContent = state.controlEnabled
-    ? 'Queued for the bridge · applies in ≤2 s'
-    : 'Control disabled on this server';
+  // Final deployment deliberately exposes telemetry only. The ESP32's local
+  // rule-based controller retains relay authority even if a development server
+  // happens to expose a command endpoint.
+  $('controlHint').textContent = 'Telemetry-only · local ESP32 AUTO retains relay authority';
 
   renderAlerts(s.alerts || []);
 
