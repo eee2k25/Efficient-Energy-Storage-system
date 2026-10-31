@@ -59,6 +59,41 @@ function post(pathname, obj, headers = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Raw status code for any method/port — used by the auth checks. */
+function raw(method, pathname, port, body, headers = {}) {
+  return new Promise((resolve) => {
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: pathname,
+        method,
+        headers: payload
+          ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), ...headers }
+          : headers,
+      },
+      (res) => { res.resume(); resolve(res.statusCode); }
+    );
+    req.on('error', () => resolve(0));
+    req.setTimeout(6000, () => { req.destroy(); resolve(0); });
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function fetchFrom(port, pathname) {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port, path: pathname }, (res) => {
+      let buf = '';
+      res.on('data', (c) => (buf += c));
+      res.on('end', () => resolve({ status: res.statusCode, body: buf }));
+    });
+    req.on('error', reject);
+    req.setTimeout(6000, () => req.destroy(new Error('timeout')));
+  });
+}
+
 (async () => {
   console.log('\n\x1b[1mEES dashboard self-test\x1b[0m\n');
 
@@ -140,9 +175,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const bad = await post('/api/ingest', { nothing: 'useful' });
   ok('ingest rejects a sample with no measurements', bad.status === 422, bad.body);
 
+  /* ---------- GET ingest (ESP32 direct, no JSON body) ---------- */
+  const getIngest = await get('/api/ingest?pvV=18.11&pvI=0.4&pvP=7.24'
+    + '&loadV=12.44&loadI=0.25&loadP=3.11&mode=AUTO_SAVE&relay=0&src=esp32wifi');
+  ok('GET ingest accepts query-string readings', getIngest.status === 200, getIngest.body);
+  const afterGet = JSON.parse((await get('/api/summary')).body);
+  ok('GET ingest stores the measured values',
+    afterGet.latest?.pv?.v === 18.11 && afterGet.latest?.mode === 'AUTO_SAVE',
+    JSON.stringify(afterGet.latest));
+  ok('GET ingest labels the source', !!afterGet.sources?.esp32wifi, JSON.stringify(afterGet.sources));
+
+  const getBad = await get('/api/ingest?nothing=1');
+  ok('GET ingest rejects an empty query', getBad.status === 422, getBad.body);
+
   /* ---------- ingest key ---------- */
   const secured = spawn(process.execPath, [path.join(ROOT, 'dashboard', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT + 1), DATA_DIR, INGEST_KEY: 'secret123', SIMULATE: '1' },
+    env: { ...process.env, PORT: String(PORT + 1), DATA_DIR, INGEST_KEY: 'secret123', CONTROL_KEY: 'ctl456', SIMULATE: '1' },
     stdio: 'ignore',
   });
   await sleep(1200);
@@ -154,6 +202,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     req.end(JSON.stringify({ pv: { v: 18 } }));
   });
   ok('ingest key is enforced when configured', noKey === 401 || noKey === 0, `status=${noKey}`);
+
+  const getNoKey = await raw('GET', '/api/ingest?pvV=18', PORT + 1);
+  ok('GET ingest requires the key too', getNoKey === 401 || getNoKey === 0, `status=${getNoKey}`);
+  const getWithKey = await raw('GET', '/api/ingest?pvV=18&key=secret123', PORT + 1);
+  ok('GET ingest accepts the key in the query string', getWithKey === 200, `status=${getWithKey}`);
+
+  const cmdNoKey = await raw('POST', '/api/command', PORT + 1, { cmd: 'SAVE' });
+  ok('control key is enforced when configured', cmdNoKey === 401, `status=${cmdNoKey}`);
+  const cmdWithKey = await raw('POST', '/api/command', PORT + 1, { cmd: 'SAVE' }, { 'x-control-key': 'ctl456' });
+  ok('control key unlocks the buttons', cmdWithKey === 200, `status=${cmdWithKey}`);
+
+  const summarySec = JSON.parse((await fetchFrom(PORT + 1, '/api/summary')).body);
+  ok('summary reports that control is locked', summarySec.control?.locked === true, JSON.stringify(summarySec.control));
+
   secured.kill('SIGTERM');
 
   /* ---------- CSV ---------- */

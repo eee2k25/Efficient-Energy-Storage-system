@@ -6,6 +6,14 @@ understands, and how to calibrate it for your existing firmware.
 
 ---
 
+> **Want the dashboard without a laptop?** Use
+> [telemetry_cloud_addon.ino](../firmware/telemetry_cloud_addon.ino) instead — it prints
+> the same JSON line *and* posts it over WiFi from a background task, switchable with
+> `CLOUD ON` / `CLOUD OFF` in the Serial Monitor. See
+> [DEPLOY_FREE.md](DEPLOY_FREE.md). The serial format below is unchanged either way.
+
+---
+
 ## 1. Recommended: one JSON line every 2 s
 
 This is the most robust option and costs a handful of microseconds. It adds
