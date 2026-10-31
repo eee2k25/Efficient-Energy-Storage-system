@@ -22,6 +22,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const INGEST_KEY = process.env.INGEST_KEY || '';
+const CONTROL_KEY = process.env.CONTROL_KEY || '';
 const SIMULATE = /^(1|true|yes)$/i.test(process.env.SIMULATE || '') || process.argv.includes('--simulate');
 const ALLOW_CONTROL = !/^(0|false|no)$/i.test(process.env.ALLOW_CONTROL || 'true');
 const MAX_BODY = 1024 * 1024;
@@ -50,6 +51,30 @@ function json(res, code, obj) {
     'access-control-allow-origin': '*',
   });
   res.end(body);
+}
+
+/** Turn query-string parameters into the same object shape POST /api/ingest takes. */
+function sampleFromQuery(params) {
+  const pick = (...keys) => {
+    for (const k of keys) {
+      if (params.has(k) && params.get(k) !== '') return params.get(k);
+    }
+    return undefined;
+  };
+  return {
+    t: pick('t', 'ts', 'timestamp'),
+    pvV: pick('pvV', 'pv_v', 'pvv'),
+    pvI: pick('pvI', 'pv_i', 'pvi'),
+    pvP: pick('pvP', 'pv_p', 'pvw'),
+    loadV: pick('loadV', 'load_v', 'ldv', 'bus'),
+    loadI: pick('loadI', 'load_i', 'ldi'),
+    loadP: pick('loadP', 'load_p', 'ldw'),
+    bus: pick('bus', 'busV', 'batV'),
+    mode: pick('mode', 'state'),
+    relay: pick('relay'),
+    soc: pick('soc'),
+    src: pick('src') || 'esp32',
+  };
 }
 
 function readBody(req) {
@@ -86,7 +111,7 @@ function summaryPayload(range) {
   return {
     ...store.kpis(range, now),
     alerts: store.alerts(now),
-    control: { enabled: ALLOW_CONTROL, pending: store.commands.slice(-5) },
+    control: { enabled: ALLOW_CONTROL, locked: Boolean(CONTROL_KEY), pending: store.commands.slice(-5) },
     buffer: store.samples.length,
     simulating: Boolean(simTimer),
     server: { uptimeS: Math.round((now - startedAt) / 1000), simulate: Boolean(simTimer), version: 1 },
@@ -171,16 +196,14 @@ const server = http.createServer(async (req, res) => {
 
   try {
     /* ---------------- ingest ---------------- */
-    if (p === '/api/ingest' && req.method === 'POST') {
-      if (INGEST_KEY) {
-        const key = req.headers['x-api-key'] || url.searchParams.get('key');
-        if (key !== INGEST_KEY) return json(res, 401, { ok: false, error: 'bad api key' });
-      }
-      const raw = await readBody(req);
-      let body;
-      try { body = JSON.parse(raw); } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+    const ingestKeyOk = () => {
+      if (!INGEST_KEY) return true;
+      const key = req.headers['x-api-key'] || url.searchParams.get('key');
+      return key === INGEST_KEY;
+    };
 
-      const items = Array.isArray(body) ? body : Array.isArray(body?.samples) ? body.samples : [body];
+    /** Store every sample we can use, wake the UI, return the standard reply. */
+    const acceptIngest = (items) => {
       let accepted = 0;
       let last = null;
       for (const item of items) {
@@ -191,7 +214,28 @@ const server = http.createServer(async (req, res) => {
         if (last.src !== 'sim') haltSimulator('real hardware data received');
         publish(last);
       }
-      return json(res, accepted ? 200 : 422, { ok: accepted > 0, accepted, rejected: items.length - accepted });
+      return { ok: accepted > 0, accepted, rejected: items.length - accepted };
+    };
+
+    if (p === '/api/ingest' && req.method === 'POST') {
+      if (!ingestKeyOk()) return json(res, 401, { ok: false, error: 'bad api key' });
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+
+      const items = Array.isArray(body) ? body : Array.isArray(body?.samples) ? body.samples : [body];
+      const out = acceptIngest(items);
+      return json(res, out.ok ? 200 : 422, out);
+    }
+
+    /* GET ingest — for clients without a JSON body (bare ESP32 WiFiClient,
+     * ThingSpeak-style URL calls, or a quick test from a phone browser):
+     *   /api/ingest?pvV=18.42&pvI=0.41&pvP=7.55&loadV=12.38&loadI=0.27&loadP=3.27&mode=AUTO_SAVE&relay=0&key=SECRET
+     */
+    if (p === '/api/ingest' && req.method === 'GET') {
+      if (!ingestKeyOk()) return json(res, 401, { ok: false, error: 'bad api key' });
+      const out = acceptIngest([sampleFromQuery(url.searchParams)]);
+      return json(res, out.ok ? 200 : 422, out);
     }
 
     /* ---------------- live stream ---------------- */
@@ -239,6 +283,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         simulate: Boolean(simTimer),
         thingspeak: Boolean(process.env.THINGSPEAK_CHANNEL),
+        ingestKey: Boolean(INGEST_KEY),
+        controlKey: Boolean(CONTROL_KEY),
         samples: store.samples.length,
         lastSeen: last ? last.t : null,
         lastAgeMs: last ? Date.now() - last.t : null,
@@ -252,6 +298,10 @@ const server = http.createServer(async (req, res) => {
      * Only used when the bridge runs with --allow-control.               */
     if (p === '/api/command' && req.method === 'POST') {
       if (!ALLOW_CONTROL) return json(res, 403, { ok: false, error: 'control disabled' });
+      if (CONTROL_KEY) {
+        const key = req.headers['x-control-key'] || url.searchParams.get('ckey');
+        if (key !== CONTROL_KEY) return json(res, 401, { ok: false, error: 'control key required' });
+      }
       const raw = await readBody(req);
       let body;
       try { body = JSON.parse(raw || '{}'); } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
@@ -301,7 +351,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  Mode       : ${SIMULATE ? 'SIMULATION (no hardware)' : 'LIVE (waiting for data)'}`);
   console.log(`  Ingest key : ${INGEST_KEY ? 'required' : 'open (set INGEST_KEY to secure)'}`);
   console.log(`  ThingSpeak : ${process.env.THINGSPEAK_CHANNEL ? 'channel ' + process.env.THINGSPEAK_CHANNEL : 'off'}`);
-  console.log(`  Control    : ${ALLOW_CONTROL ? 'enabled (AUTO/NORMAL/SAVE)' : 'disabled'}`);
+  console.log(`  Control    : ${ALLOW_CONTROL ? (CONTROL_KEY ? 'enabled (CONTROL_KEY required)' : 'enabled (AUTO/NORMAL/SAVE)') : 'disabled'}`);
   console.log('');
 });
 

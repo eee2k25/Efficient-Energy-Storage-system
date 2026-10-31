@@ -87,7 +87,8 @@ Three ways to get data in — use any combination:
 
 | Source | Enable with | Use when |
 |---|---|---|
-| Serial bridge (recommended) | `py bridge/serial_bridge.py --port COM3` | laptop is next to the hardware |
+| WiFi firmware, straight to the dashboard | `firmware/telemetry_cloud_addon.ino` + `CLOUD ON` | no laptop, cloud URL (2–5 s) |
+| Serial bridge | `py bridge/serial_bridge.py --port COM3` | laptop is next to the hardware |
 | ThingSpeak poller | `THINGSPEAK_CHANNEL=1234567 THINGSPEAK_READ_KEY=... node dashboard/server.js` | ESP32 already posts to ThingSpeak |
 | Simulator | `node dashboard/server.js --simulate` | demos, report screenshots, UI work |
 
@@ -173,13 +174,29 @@ server with `ALLOW_CONTROL=0`.
 
 ---
 
-## 6. Deploying to the cloud
+## 6. Deploying to the cloud (free, no credit card)
 
-The server needs a **long-lived process** (it holds an SSE stream, an in-memory
-ring buffer and a JSONL file). Vercel/Netlify serverless functions are *not*
-suitable — use a container host.
+The server needs a **long-lived process** (SSE stream, in-memory ring buffer, JSONL
+file). Vercel/Netlify serverless functions are *not* suitable.
 
-**Docker (anywhere):**
+**Render free tier is supported and needs no card** — but only with a free-shaped
+blueprint: `plan: free` and **no** persistent disk (free services cannot attach one).
+`render.yaml` in this repo is exactly that, so `New + → Blueprint → Apply` deploys
+without a payment prompt. Full walkthrough, including the 750 instance-hour budget that
+also covers your other Render sites, firmware flashing and the
+`CLOUD ON` / `CLOUD OFF` workflow:
+**[docs/DEPLOY_FREE.md](docs/DEPLOY_FREE.md)**.
+
+Other options, all without a card:
+
+| Host | Sleeps? | Notes |
+|---|---|---|
+| **Render free** (this repo) | yes, after 15 min idle | 750 h/month shared per workspace, no disk → history resets on wake |
+| **Cloudflare Workers + D1** | never | needs a small port of `server.js`; free 100 k writes/day |
+| **Deno Deploy** | never | same idea, Deno KV |
+| Fly.io / Koyeb / Hugging Face Docker | — | now need a paid plan or a card |
+
+**Docker (anywhere, always on):**
 
 ```bash
 docker build -t ees-dashboard .
@@ -187,29 +204,30 @@ docker run -p 3000:3000 -v ees-data:/app/dashboard/data \
   -e INGEST_KEY=choose-a-key -e ALLOW_CONTROL=0 ees-dashboard
 ```
 
-**Render / Railway / Fly.io:** deploy the repo as a Docker service, mount a
-persistent disk at `/app/dashboard/data`, set `INGEST_KEY`, then point the bridge
-at the public URL:
+Point either data source at the public URL:
 
 ```bash
+# laptop + USB
 py bridge/serial_bridge.py --port COM3 --url https://your-app.onrender.com --ingest-key choose-a-key
+# or flash firmware/telemetry_cloud_addon.ino and type CLOUD ON in the Serial Monitor
 ```
 
 Environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PORT` | `3000` | HTTP port |
+| `PORT` | `3000` | HTTP port (Render sets it) |
 | `HOST` | `0.0.0.0` | bind address |
 | `SIMULATE` | off | `1` = demo generator, no hardware |
-| `INGEST_KEY` | empty | if set, `/api/ingest` requires `x-api-key` |
+| `INGEST_KEY` | empty | if set, `/api/ingest` requires `x-api-key` (or `?key=`) |
 | `ALLOW_CONTROL` | `true` | `0` disables the AUTO/NORMAL/SAVE endpoint |
-| `DATA_DIR` | `dashboard/data` | where `samples.jsonl` lives (mount a volume) |
+| `CONTROL_KEY` | empty | if set, `/api/command` also needs `x-control-key`; the page asks once |
+| `DATA_DIR` | `dashboard/data` | where `samples.jsonl` lives (mount a volume; free Render has none) |
 | `THINGSPEAK_CHANNEL` / `THINGSPEAK_READ_KEY` | — | read readings from ThingSpeak |
 | `SIM_TICK_MS` | `1500` | simulated sample interval |
 
-> **Security note:** the dashboard has no login. On a public URL set `INGEST_KEY`
-> and `ALLOW_CONTROL=0`, or put it behind your host's auth/basic-auth.
+> **Security note:** the dashboard has no login. On a public URL keep `INGEST_KEY` set,
+> and either `ALLOW_CONTROL=0` or a `CONTROL_KEY`, so nobody can flip your relay.
 
 ---
 
@@ -218,6 +236,7 @@ Environment variables:
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/ingest` | accept one sample or an array (bridge / ESP32 / scripts) |
+| `GET` | `/api/ingest?pvV=…&loadV=…&mode=…` | same, from the query string (bare ESP32, browser test) |
 | `GET` | `/api/stream?range=15m` | SSE: `sample`, `summary`, `event` frames |
 | `GET` | `/api/summary?range=15m` | latest sample, means, modes, energy, alerts |
 | `GET` | `/api/series?range=15m&points=480` | bucket-averaged arrays for the charts |
@@ -259,12 +278,14 @@ bridge/
   .env.example         copy to .env (gitignored) for port, URL, keys
 firmware/
   telemetry_addon.ino  OPTIONAL v10 snippet: JSON print (+ ThingSpeak variant)
+  telemetry_cloud_addon.ino  WiFi → dashboard from a background task, CLOUD ON/OFF
 scripts/selftest.js    end-to-end API test (36 checks)
 scripts/ui-smoke-test.js  runs the real page in jsdom (15 checks)
 tools/
   thingspeak_check.py  verify channel + API keys, offline mapping self-test
 docs/
   CONNECT_HARDWARE.md  step-by-step real hardware hookup + troubleshooting
+  DEPLOY_FREE.md       Render free deploy, ESP32 WiFi mode, 750-hour budget
   FIRMWARE_SERIAL.md   exact print snippet + format calibration
   sample_serial_lines.txt  replayable example lines
 Dockerfile

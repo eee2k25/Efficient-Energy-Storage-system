@@ -1,20 +1,33 @@
-# Render blueprint — one-click deploy of the telemetry dashboard.
-# Dashboard: https://<name>.onrender.com   (always-on, keeps the SSE stream alive)
+# ─────────────────────────────────────────────────────────────────────────────
+# Render Blueprint — 100% FREE tier, NO CREDIT CARD required.
+#
+# Free-tier rules this file respects:
+#   • plan must be `free`            (any other plan, or a `disk:`, asks for a card)
+#   • free services get NO persistent disk → don't request one, data is in-memory
+#   • free services sleep after 15 min without inbound traffic → the page polls
+#     instead of relying on a permanently open SSE stream
+#   • 750 instance-hours / month per workspace → see docs/DEPLOY_FREE.md
+#
+# Deploy: Render Dashboard → New → Blueprint → pick this repo + branch → Apply.
+# ─────────────────────────────────────────────────────────────────────────────
 services:
   - type: web
     name: ees-solar-dashboard
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter            # free plan sleeps, which breaks live streaming
+    plan: free
+    region: singapore        # closest to India; also: oregon | ohio | virginia | frankfurt
     healthCheckPath: /api/health
+    autoDeploy: true
     envVars:
+      # Required on POST/GET /api/ingest. Render generates it for you — open the
+      # service → Environment → copy INGEST_KEY into the ESP32 sketch.
       - key: INGEST_KEY
-        generateValue: true  # copy this value into the bridge --ingest-key
+        generateValue: true
+      # AUTO / NORMAL / SAVE buttons are live (you asked for them). Lock them
+      # later without touching code: add CONTROL_KEY=<any-secret> here.
       - key: ALLOW_CONTROL
+        value: "true"
+      # Never mix the demo generator into a real deployment.
+      - key: SIMULATE
         value: "false"
-      - key: DATA_DIR
-        value: /app/dashboard/data
-    disk:
-      name: telemetry
-      mountPath: /app/dashboard/data
-      sizeGB: 1

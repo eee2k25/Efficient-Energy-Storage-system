@@ -520,6 +520,34 @@ setInterval(async () => {
 
 /* ───────────────────────────── controls ───────────────────────────── */
 
+/**
+ * Queue AUTO / NORMAL / SAVE. When the server runs with CONTROL_KEY set it
+ * answers 401; we ask for the key once and remember it in this browser.
+ * (On a public URL that keeps the buttons usable for you and dead for strangers.)
+ */
+async function sendCommand(cmd) {
+  const stored = () => (typeof localStorage !== 'undefined' ? localStorage.getItem('ees-control-key') || '' : '');
+  const call = (key) =>
+    fetch('/api/command', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(key ? { 'x-control-key': key } : {}) },
+      body: JSON.stringify({ cmd, by: 'dashboard' }),
+    });
+
+  let res = await call(stored());
+  if (res.status === 401) {
+    const entered = typeof window.prompt === 'function'
+      ? window.prompt('This dashboard is locked.\nPaste the CONTROL_KEY from your host settings:')
+      : null;
+    if (!entered) throw new Error('control key required');
+    localStorage.setItem('ees-control-key', entered.trim());
+    res = await call(entered.trim());
+  }
+  const d = await res.json();
+  if (!d.ok) throw new Error(d.error || 'rejected');
+  return d;
+}
+
 function initControls() {
   document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -549,14 +577,9 @@ function initControls() {
     btn.addEventListener('click', async () => {
       const cmd = btn.dataset.cmd;
       try {
-        const res = await fetch('/api/command', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cmd, by: 'dashboard' }),
-        });
-        const d = await res.json();
-        if (!d.ok) throw new Error(d.error || 'rejected');
+        const d = await sendCommand(cmd);
         $('controlHint').textContent = `${cmd} queued at ${clock(Date.now())}`;
+        return d;
       } catch (e) {
         $('controlHint').textContent = `failed: ${e.message}`;
       }
