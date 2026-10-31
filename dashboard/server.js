@@ -24,7 +24,10 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const INGEST_KEY = process.env.INGEST_KEY || '';
 const CONTROL_KEY = process.env.CONTROL_KEY || '';
 const SIMULATE = /^(1|true|yes)$/i.test(process.env.SIMULATE || '') || process.argv.includes('--simulate');
-const ALLOW_CONTROL = !/^(0|false|no)$/i.test(process.env.ALLOW_CONTROL || 'true');
+// Final project deployment is deliberately telemetry-only.  Relay commands
+// remain local to the ESP32's documented rule-based safety controller.  Remote
+// control is opt-in for isolated lab development only, never the default.
+const ALLOW_CONTROL = /^(1|true|yes)$/i.test(process.env.ALLOW_CONTROL || 'false');
 const MAX_BODY = 1024 * 1024;
 
 const store = new Store();

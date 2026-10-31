@@ -161,11 +161,79 @@ def _fill(group: str, vals: dict, out: dict) -> None:
         out["bus"] = v
 
 
+def _finite_field(text: str) -> float | None:
+    """Convert a CSV field to a finite float; ESP32 uses `nan` for battery INA fields."""
+    try:
+        value = float(text.strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value == value and value not in (float("inf"), float("-inf")) else None
+
+
+def _parse_v10_data(line: str) -> dict | None:
+    """Parse the final v10 ESP32 DATA frame exactly.
+
+    Final firmware emits:
+      DATA,time_s,pv_V,pv_mA,pv_mW,bat_V,bat_mA,bat_mW,
+           load_V,load_mA,load_mW,secondary_load
+
+    Battery fields are intentionally `nan` in the two-INA final design.  The
+    dashboard must *not* treat the first positional value (`time_s`) as PV
+    voltage, nor present mA/mW as A/W.  This dedicated branch performs the
+    required mA→A and mW→W conversions.
+    """
+    fields = [f.strip() for f in line.split(",")]
+    if len(fields) != 12 or fields[0].upper() != "DATA":
+        return None
+
+    pv_v = _finite_field(fields[2])
+    pv_ma = _finite_field(fields[3])
+    pv_mw = _finite_field(fields[4])
+    load_v = _finite_field(fields[8])
+    load_ma = _finite_field(fields[9])
+    load_mw = _finite_field(fields[10])
+    secondary = fields[11].upper()
+
+    # Reject the known INA/PWM power-up settling frames (around 0–2 V) while
+    # retaining every plausible operating or safety-voltage frame.  A 12 V
+    # SLA load bus should never be legitimately below 8 V in this prototype.
+    if None in (pv_v, pv_ma, pv_mw, load_v, load_ma, load_mw):
+        return None
+    if not (0.0 <= pv_v <= 32.0 and 8.0 <= load_v <= 20.0):
+        return None
+
+    # The final firmware has documented polarity compensation for the
+    # permanently reverse-mounted Load INA.  Refuse old negative-load frames
+    # so the public dashboard cannot accidentally display pre-correction data.
+    if load_ma < -0.5 or load_mw < -5.0:
+        return None
+    if secondary not in ("ON", "OFF"):
+        return None
+
+    relay_on = secondary == "ON"
+    return {
+        "pv": {"v": pv_v, "i": pv_ma / 1000.0, "p": pv_mw / 1000.0},
+        "load": {"v": load_v, "i": load_ma / 1000.0, "p": load_mw / 1000.0},
+        "bus": load_v,
+        # DATA contains relay state rather than the controller's full command
+        # mode.  The dashboard labels the two demonstrated operating states
+        # from that state, without claiming ML or remote control authority.
+        "mode": "NORMAL" if relay_on else "SAVE",
+        "relay": relay_on,
+        "src": "serial",
+    }
+
+
 def parse_line(line: str) -> dict | None:
     """Parse one serial line into a dashboard sample dict (or None)."""
     line = line.strip().strip("\r\n\x00")
     if not line or len(line) < 4:
         return None
+
+    # 0) Final project v10 DATA CSV frame. This must precede the generic
+    # positional fallback because DATA begins with a time_s field.
+    if line.upper().startswith("DATA,"):
+        return _parse_v10_data(line)
 
     # 1) JSON frame - the most robust option for the firmware
     if line.startswith("{"):

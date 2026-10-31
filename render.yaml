@@ -24,10 +24,10 @@ services:
       # service → Environment → copy INGEST_KEY into the ESP32 sketch.
       - key: INGEST_KEY
         generateValue: true
-      # AUTO / NORMAL / SAVE buttons are live (you asked for them). Lock them
-      # later without touching code: add CONTROL_KEY=<any-secret> here.
+      # Final review deployment is read-only telemetry. The ESP32 retains local
+      # rule-based safety authority; the website must never issue relay commands.
       - key: ALLOW_CONTROL
-        value: "true"
+        value: "false"
       # Never mix the demo generator into a real deployment.
       - key: SIMULATE
         value: "false"

@@ -488,6 +488,22 @@ body {
 .cbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 .cbtn.is-active { color: var(--accent, #6ee7b7); }
 .control small { font-size: 10px; color: var(--muted-dim); }
+.control-readonly { padding-bottom: 1px; }
+.control-status { display: flex; align-items: center; gap: 7px; margin: 8px 0 6px; color: #bae6fd; font-family: var(--mono); font-size: 11px; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bus); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12); }
+
+/* ───────────────────────────── ML evidence ───────────────────────────── */
+.ml-evidence { position: relative; overflow: hidden; }
+.ml-evidence::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: linear-gradient(var(--net), var(--bus)); opacity: .85; }
+.ml-badge { color: #c4b5fd; border-color: rgba(167, 139, 250, .32); background: rgba(167, 139, 250, .08); }
+.ml-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.ml-metrics > div { padding: 8px 9px; border: 1px solid rgba(148, 163, 184, .10); background: rgba(0,0,0,.12); border-radius: 9px; min-width: 0; }
+.ml-metrics span, .ml-metrics small { display: block; color: var(--muted); font-size: 9.5px; line-height: 1.25; }
+.ml-metrics b { display: block; margin: 3px 0 1px; color: var(--text); font-family: var(--mono); font-size: 17px; letter-spacing: -.03em; }
+.ml-rule { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; margin-top: 11px; color: #c4b5fd; font-family: var(--mono); font-size: 11px; }
+.ml-rule code { color: #c4b5fd; padding: 3px 5px; border: 1px solid rgba(167, 139, 250, .25); border-radius: 5px; background: rgba(167, 139, 250, .07); }
+.ml-rule i { color: var(--muted); font-style: normal; }
+.ml-note { margin: 9px 0 0; color: var(--muted-dim); font-size: 10.5px; line-height: 1.45; }
 
 /* ───────────────────────────── stats ───────────────────────────── */
 
@@ -648,6 +664,7 @@ table.events tr.empty td { color: var(--muted-dim); font-family: var(--sans); te
   .kpis { grid-template-columns: minmax(0, 1fr); }
   .top-actions .pill.ghost { display: none; }
   .kpi-value { font-size: 22px; }
+  .ml-metrics { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
